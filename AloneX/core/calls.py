@@ -76,12 +76,16 @@ class TgCall(PyTgCalls):
             else config.DEFAULT_THUMB
         )
 
-        if not media.file_path:
+        # A cached/local file is preferred. If no completed download exists,
+        # pass the YouTube URL to PyTgCalls so its FFmpeg/yt-dlp input can begin
+        # fetching media immediately rather than waiting for yt.download().
+        media_source = media.file_path or media.url
+        if not media_source:
             await message.edit_text(_lang["error_no_file"].format(config.SUPPORT_CHAT))
             return await self.play_next(chat_id)
 
         stream = types.MediaStream(
-            media_path=media.file_path,
+            media_path=media_source,
             audio_parameters=types.AudioQuality.HIGH,
             video_parameters=types.VideoQuality.HD_720p,
             audio_flags=types.MediaStream.Flags.REQUIRED,
