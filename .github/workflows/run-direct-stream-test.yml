@@ -1,0 +1,154 @@
+name: Run Direct Stream Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: direct-stream-test-20261010-bot
+  cancel-in-progress: false
+
+jobs:
+  run-test-bot:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout test branch only
+        uses: actions/checkout@v4
+        with:
+          ref: direct-stream-test-20261010
+          persist-credentials: false
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg build-essential libffi-dev libssl-dev
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.6"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python - <<'PY'
+          import yt_dlp
+          print("yt-dlp:", yt_dlp.version.__version__)
+          import pytgcalls
+          print("PyTgCalls: available")
+          PY
+
+      - name: Validate required secrets
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          MONGO_URL: ${{ secrets.MONGO_URL }}
+          LOGGER_ID: ${{ secrets.LOGGER_ID }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+          SESSION: ${{ secrets.SESSION }}
+        run: |
+          set -euo pipefail
+          for name in API_ID API_HASH BOT_TOKEN MONGO_URL LOGGER_ID OWNER_ID SESSION; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Start temporary local download API
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/local-api.log"
+          nohup python local_api_server.py > "$RUNNER_TEMP/local-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/local-api.pid"
+          for i in {1..30}; do
+            if curl -fsS "http://127.0.0.1:8765/health" >/dev/null; then
+              echo "Temporary local download API is ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Temporary local download API failed to start."
+          cat "$RUNNER_TEMP/local-api.log" || true
+          exit 1
+
+      - name: Start test-branch bot
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          MONGO_URL: ${{ secrets.MONGO_URL }}
+          LOGGER_ID: ${{ secrets.LOGGER_ID }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+          SESSION: ${{ secrets.SESSION }}
+          SESSION2: ${{ secrets.SESSION2 }}
+          SESSION3: ${{ secrets.SESSION3 }}
+          SUPPORT_CHANNEL: ${{ secrets.SUPPORT_CHANNEL }}
+          SUPPORT_CHAT: ${{ secrets.SUPPORT_CHAT }}
+          AUTO_END: ${{ secrets.AUTO_END }}
+          AUTO_LEAVE: ${{ secrets.AUTO_LEAVE }}
+          VIDEO_PLAY: ${{ secrets.VIDEO_PLAY }}
+          QUEUE_LIMIT: ${{ secrets.QUEUE_LIMIT || '50' }}
+          DURATION_LIMIT: ${{ secrets.DURATION_LIMIT || '5400' }}
+          PLAYLIST_LIMIT: ${{ secrets.PLAYLIST_LIMIT || '20' }}
+          COOKIES_URL: ${{ secrets.COOKIES_URL }}
+          DEFAULT_THUMB: ${{ secrets.DEFAULT_THUMB }}
+          PING_IMG: ${{ secrets.PING_IMG }}
+          START_IMG: ${{ secrets.START_IMG }}
+          HELP_URL: ${{ secrets.HELP_URL }}
+          SHRUTI_API_URL: "http://127.0.0.1:8765"
+          SHRUTI_API_KEY: ""
+          PYTHONUNBUFFERED: "1"
+          PYTHONFAULTHANDLER: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/musicbot.log"
+          nohup bash start > "$RUNNER_TEMP/musicbot.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/musicbot.pid"
+          echo "Test-branch bot started with PID $(cat "$RUNNER_TEMP/musicbot.pid")"
+
+      - name: Monitor test run and show logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          pid="$(cat "$RUNNER_TEMP/musicbot.pid")"
+          for i in {1..120}; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::Test bot exited during startup."
+              tail -n 200 "$RUNNER_TEMP/musicbot.log" || true
+              exit 1
+            fi
+            if (( i >= 30 )); then
+              break
+            fi
+            sleep 1
+          done
+          tail -n 0 -F "$RUNNER_TEMP/musicbot.log" &
+          tail_pid=$!
+          end=$(( $(date +%s) + 1500 ))
+          while (( $(date +%s) < end )); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              kill "$tail_pid" 2>/dev/null || true
+              echo "::error::Test bot stopped."
+              tail -n 200 "$RUNNER_TEMP/musicbot.log" || true
+              exit 1
+            fi
+            sleep 10
+          done
+          kill "$tail_pid" 2>/dev/null || true
+          echo "Test window finished (30 minutes)."
