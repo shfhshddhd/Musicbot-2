@@ -144,6 +144,30 @@ class TgCall(PyTgCalls):
             await self.stop(chat_id)
             await message.edit_text(_lang["error_rtmp"])
 
+        except exceptions.YtDlpError as ex:
+            # PyTgCalls raises this when YouTube blocks extraction or the
+            # configured cookie file is invalid/missing. Do not leave the
+            # request stuck on the generic Searching message.
+            logger.error(f"YouTube direct-stream extraction failed for {media.id}: {ex}")
+            try:
+                await message.edit_text(
+                    "❌ YouTube ne stream access block kar diya. "
+                    "Valid YouTube cookies (Netscape cookies.txt) configure karke dobara try karein."
+                )
+            except Exception:
+                pass
+        except Exception as ex:
+            # A failed stream setup must be visible to the user, not an
+            # unhandled Pyrogram dispatcher exception.
+            logger.exception(f"Stream setup failed for {media.id}: {ex}")
+            try:
+                await message.edit_text(
+                    "❌ Song mil gaya, lekin stream start nahi hui. "
+                    "Logs mein stream setup error check karein."
+                )
+            except Exception:
+                pass
+
 
     async def replay(self, chat_id: int) -> None:
         if not await db.get_call(chat_id):
