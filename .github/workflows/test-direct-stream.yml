@@ -1,0 +1,53 @@
+name: Direct Stream Test (Isolated)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: direct-stream-test-20261010-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate test branch without starting the bot
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout test branch only
+        uses: actions/checkout@v4
+        with:
+          ref: direct-stream-test-20261010
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Python syntax
+        run: python -m compileall -q AloneX
+
+      - name: Check workflow YAML syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          paths = [
+              Path(".github/workflows/test-direct-stream.yml"),
+          ]
+          for path in paths:
+              with path.open(encoding="utf-8") as stream:
+                  yaml.safe_load(stream)
+              print(f"YAML OK: {path}")
+          PY
+
+      - name: Confirm isolated branch
+        run: |
+          test "$(git branch --show-current)" = "direct-stream-test-20261010"
+          echo "Validation completed on direct-stream-test-20261010."
+          echo "The live bot was not started and no Telegram secrets were used."
