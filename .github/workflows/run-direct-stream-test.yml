@@ -55,6 +55,62 @@ jobs:
           print("PyTgCalls: available")
           PY
 
+      - name: Configure PyTgCalls YouTube extractor for direct streaming
+        env:
+          COOKIES_URL: ${{ secrets.COOKIES_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          import site
+
+          cookie_path = Path("/tmp/musicbot-cookies.txt")
+          cookie_url = next(
+              (u for u in os.getenv("COOKIES_URL", "").split()
+               if u.startswith("https://") and "batbin.me" in u),
+              None,
+          )
+          if cookie_url:
+              try:
+                  req = Request(cookie_url, headers={"User-Agent": "Mozilla/5.0"})
+                  with urlopen(req, timeout=15) as response:
+                      payload = response.read(2_000_000)
+                  first = payload.decode("utf-8-sig", errors="replace").splitlines()[0].strip()
+                  if first in {"# Netscape HTTP Cookie File", "# HTTP Cookie File"}:
+                      cookie_path.write_bytes(payload)
+                      cookie_path.chmod(0o600)
+                      print("Valid Netscape cookie file configured for PyTgCalls.")
+                  else:
+                      print("::warning::COOKIES_URL did not return a Netscape cookies.txt file; streaming will continue without cookies.")
+              except Exception as exc:
+                  print(f"::warning::Could not load COOKIES_URL ({type(exc).__name__}); streaming will continue without cookies.")
+
+          module = None
+          for root in site.getsitepackages():
+              candidate = Path(root) / "pytgcalls" / "ytdlp.py"
+              if candidate.is_file():
+                  module = candidate
+                  break
+          if module is None:
+              raise SystemExit("Could not locate PyTgCalls yt-dlp extractor for configuration.")
+
+          source = module.read_text()
+          anchor = "        commands.append(link)\n"
+          if anchor not in source:
+              raise SystemExit("PyTgCalls yt-dlp extractor layout changed; refusing unsafe patch.")
+          if "youtube:player_client=web_safari" not in source:
+              inject = (
+                  "        commands += ['--extractor-args', "
+                  "'youtube:player_client=web_safari']\n"
+              )
+              if cookie_path.is_file():
+                  inject += f"        commands += ['--cookies', {str(cookie_path)!r}]\n"
+              source = source.replace(anchor, inject + anchor, 1)
+              module.write_text(source)
+          print("PyTgCalls direct-stream extractor configured (no full-track download added).")
+          PY
+
       - name: Validate required secrets
         env:
           API_ID: ${{ secrets.API_ID }}
