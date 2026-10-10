@@ -2,6 +2,9 @@ name: Direct Stream Test (Isolated)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - direct-stream-test-20261010
 
 permissions:
   contents: read
