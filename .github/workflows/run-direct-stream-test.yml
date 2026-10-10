@@ -2,6 +2,11 @@ name: Run Direct Stream Test
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - direct-stream-test-20261010
+    paths:
+      - '.github/workflows/run-direct-stream-test.yml'
 
 permissions:
   contents: read
