@@ -64,9 +64,7 @@ jobs:
           compile(decoded, str(path), "exec")
           print("Packed downloader decoded and syntax-checked.")
           print("Downloader source length:", len(decoded))
-          for number, line in enumerate(decoded.splitlines(), 1):
-              if re.search(r"def download|async def download|YoutubeDL|progress_hooks|outtmpl|format|postprocessor|ffmpeg", line, re.I):
-                  print(f"{number}: {line[:240]}")
+          print(decoded)
           PY
 
       - name: Confirm isolated branch
