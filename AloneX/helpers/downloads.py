@@ -23,10 +23,19 @@ async def download_track(media):
     if _valid_file(media.file_path):
         return media.file_path
 
+    # Reuse the bot's established cache naming convention.
+    cached = Path("downloads") / f"{media.id}.{'mp4' if media.video else 'webm'}"
+    if _valid_file(str(cached)):
+        media.file_path = str(cached)
+        return media.file_path
+
     key = (str(media.id), bool(media.video))
     lock = _download_locks.setdefault(key, asyncio.Lock())
     async with lock:
         if _valid_file(media.file_path):
+            return media.file_path
+        if _valid_file(str(cached)):
+            media.file_path = str(cached)
             return media.file_path
 
         try:
