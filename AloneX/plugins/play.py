@@ -3,12 +3,11 @@
 # This file is part of AloneXMusic
 #ALONE-CODER
 
-from pathlib import Path
-
 from pyrogram import filters, types
 
 from AloneX import anon, app, config, db, lang, queue, tg, yt
 from AloneX.helpers import buttons, utils
+from AloneX.helpers.downloads import download_track
 from AloneX.helpers._play import checkUB
 
 
@@ -119,12 +118,10 @@ async def play_hndlr(
             return
 
     if not file.file_path:
-        fname = f"downloads/{file.id}.{'mp4' if video else 'webm'}"
-        if Path(fname).exists():
-            file.file_path = fname
-        else:
-            await sent.edit_text(m.lang["play_downloading"])
-            file.file_path = await yt.download(file.id, video=video)
+        await sent.edit_text(m.lang["play_downloading"])
+        file.file_path = await download_track(file)
+        if not file.file_path:
+            return await sent.edit_text(m.lang["play_not_found"].format(config.SUPPORT_CHAT))
 
     file.message_id = sent.id
     await anon.play_media(chat_id=m.chat.id, message=sent, media=file)
