@@ -12,6 +12,7 @@ from pytgcalls.pytgcalls_session import PyTgCallsSession
 
 from AloneX import app, config, db, lang, logger, queue, userbot, yt
 from AloneX.helpers import Media, Track, buttons, thumb
+from AloneX.helpers.downloads import download_track
 from AloneX.helpers.autoplay_ui import controls_with_autoplay
 from AloneX.helpers.autoplay import candidates as autoplay_candidates
 
@@ -20,6 +21,7 @@ class TgCall(PyTgCalls):
     def __init__(self):
         self.clients = []
         self._transitioning = set()
+        self._prefetch_tasks = {}
 
     async def pause(self, chat_id: int) -> bool:
         client = await db.get_assistant(chat_id)
@@ -102,6 +104,7 @@ class TgCall(PyTgCalls):
             if not seek_time:
                 media.time = 1
                 await db.add_call(chat_id)
+                self._schedule_next_prefetch(chat_id, media.id)
                 text = _lang["play_media"].format(
                     media.url,
                     media.title,
@@ -140,6 +143,33 @@ class TgCall(PyTgCalls):
             await self.stop(chat_id)
             await message.edit_text(_lang["error_rtmp"])
 
+
+
+    def _schedule_next_prefetch(self, chat_id: int, current_id: str) -> None:
+        """Download the next queued item while the current track is playing."""
+        import asyncio
+
+        next_media = queue.get_next(chat_id, check=True)
+        if not next_media or next_media.id == current_id or next_media.file_path:
+            return
+        key = (chat_id, str(next_media.id), bool(next_media.video))
+        existing = self._prefetch_tasks.get(key)
+        if existing and not existing.done():
+            return
+
+        async def prefetch():
+            try:
+                path = await download_track(next_media)
+                if path:
+                    logger.info("[prefetch] ready: %s (%s)", next_media.title, next_media.id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[prefetch] failed for %s", next_media.id)
+            finally:
+                self._prefetch_tasks.pop(key, None)
+
+        self._prefetch_tasks[key] = asyncio.create_task(prefetch())
 
     async def replay(self, chat_id: int) -> None:
         if not await db.get_call(chat_id):
@@ -288,7 +318,7 @@ class TgCall(PyTgCalls):
             _lang = await lang.get_lang(chat_id)
             msg = await app.send_message(chat_id=chat_id, text=_lang["play_next"])
             if not media.file_path:
-                media.file_path = await yt.download(media.id, video=media.video)
+                media.file_path = await download_track(media)
                 if not media.file_path:
                     await self.stop(chat_id)
                     try:
