@@ -76,16 +76,12 @@ class TgCall(PyTgCalls):
             else config.DEFAULT_THUMB
         )
 
-        # A cached/local file is preferred. If no completed download exists,
-        # pass the YouTube URL to PyTgCalls so its FFmpeg/yt-dlp input can begin
-        # fetching media immediately rather than waiting for yt.download().
-        media_source = media.file_path or media.url
-        if not media_source:
+        if not media.file_path:
             await message.edit_text(_lang["error_no_file"].format(config.SUPPORT_CHAT))
             return await self.play_next(chat_id)
 
         stream = types.MediaStream(
-            media_path=media_source,
+            media_path=media.file_path,
             audio_parameters=types.AudioQuality.HIGH,
             video_parameters=types.VideoQuality.HD_720p,
             audio_flags=types.MediaStream.Flags.REQUIRED,
@@ -143,30 +139,6 @@ class TgCall(PyTgCalls):
         except RTMPStreamingUnsupported:
             await self.stop(chat_id)
             await message.edit_text(_lang["error_rtmp"])
-
-        except exceptions.YtDlpError as ex:
-            # PyTgCalls raises this when YouTube blocks extraction or the
-            # configured cookie file is invalid/missing. Do not leave the
-            # request stuck on the generic Searching message.
-            logger.error(f"YouTube direct-stream extraction failed for {media.id}: {ex}")
-            try:
-                await message.edit_text(
-                    "❌ YouTube ne stream access block kar diya. "
-                    "Valid YouTube cookies (Netscape cookies.txt) configure karke dobara try karein."
-                )
-            except Exception:
-                pass
-        except Exception as ex:
-            # A failed stream setup must be visible to the user, not an
-            # unhandled Pyrogram dispatcher exception.
-            logger.exception(f"Stream setup failed for {media.id}: {ex}")
-            try:
-                await message.edit_text(
-                    "❌ Song mil gaya, lekin stream start nahi hui. "
-                    "Logs mein stream setup error check karein."
-                )
-            except Exception:
-                pass
 
 
     async def replay(self, chat_id: int) -> None:
@@ -315,9 +287,16 @@ class TgCall(PyTgCalls):
 
             _lang = await lang.get_lang(chat_id)
             msg = await app.send_message(chat_id=chat_id, text=_lang["play_next"])
-            # Match the initial /play path: do not block the queue transition
-            # on a full download. play_media() will use the source URL if no
-            # completed local file is available.
+            if not media.file_path:
+                media.file_path = await yt.download(media.id, video=media.video)
+                if not media.file_path:
+                    await self.stop(chat_id)
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                    return False
+
             media.message_id = msg.id
             await self.play_media(chat_id, msg, media)
             return True
