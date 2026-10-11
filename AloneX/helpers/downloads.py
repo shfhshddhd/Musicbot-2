@@ -24,7 +24,7 @@ async def download_track(media):
         return media.file_path
 
     # Reuse the bot's established cache naming convention.
-    cached = Path("downloads") / f"{media.id}.{'mp4' if media.video else 'webm'}"
+    cached = Path("downloads") / f"{media.id}.{'mp4' if media.video else 'mp3'}"
     if _valid_file(str(cached)):
         media.file_path = str(cached)
         return media.file_path
