@@ -8,6 +8,7 @@ from pyrogram import filters, types
 from AloneX import anon, app, config, db, lang, queue, tg, yt
 from AloneX.helpers import buttons, utils
 from AloneX.helpers.downloads import download_track
+from AloneX.helpers.progressive import prepare_progressive_audio
 from AloneX.helpers._play import checkUB
 
 
@@ -118,10 +119,23 @@ async def play_hndlr(
             return
 
     if not file.file_path:
-        await sent.edit_text(m.lang["play_downloading"])
-        file.file_path = await download_track(file)
-        if not file.file_path:
-            return await sent.edit_text(m.lang["play_not_found"].format(config.SUPPORT_CHAT))
+        # For the first audio-only track, prepare a small FIFO startup buffer
+        # and let FFmpeg start while the rest of the MP3 is still downloading.
+        # Video and any unsupported/API-error case use the established path.
+        progressive_path = None
+        if not file.video and not await db.get_call(m.chat.id):
+            try:
+                progressive_path, _progressive_task = await prepare_progressive_audio(file)
+            except Exception:
+                progressive_path = None
+        if progressive_path:
+            file.file_path = progressive_path
+            await sent.edit_text(m.lang["play_downloading"])
+        else:
+            await sent.edit_text(m.lang["play_downloading"])
+            file.file_path = await download_track(file)
+            if not file.file_path:
+                return await sent.edit_text(m.lang["play_not_found"].format(config.SUPPORT_CHAT))
 
     file.message_id = sent.id
     await anon.play_media(chat_id=m.chat.id, message=sent, media=file)
