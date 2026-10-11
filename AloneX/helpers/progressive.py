@@ -152,10 +152,17 @@ async def prepare_progressive_audio(media):
     # Wait for the startup buffer or an early API error, but never block on the
     # entire download. A timeout falls back to the known-good full downloader.
     try:
-        await asyncio.wait_for(
-            asyncio.gather(ready.wait(), failed.wait(), return_exceptions=True),
+        ready_waiter = asyncio.create_task(ready.wait())
+        failed_waiter = asyncio.create_task(failed.wait())
+        done, pending = await asyncio.wait(
+            {ready_waiter, failed_waiter},
             timeout=25,
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        for waiter in pending:
+            waiter.cancel()
+        if not done:
+            raise asyncio.TimeoutError
     except asyncio.TimeoutError:
         logger.warning("[progressive] startup buffer timeout for %s; using regular download", video_id)
         task.cancel()
