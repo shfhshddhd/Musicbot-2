@@ -31,12 +31,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install isolated test dependency
+        run: python -m pip install --disable-pip-version-check aiohttp PyYAML
+
       - name: Check Python syntax
-        run: python -m compileall -q AloneX
+        run: python -m compileall -q AloneX tests
 
       - name: Check workflow YAML syntax
         run: |
-          python -m pip install --disable-pip-version-check PyYAML
           python - <<'PY'
           from pathlib import Path
           import yaml
@@ -64,8 +66,10 @@ jobs:
           compile(decoded, str(path), "exec")
           print("Packed downloader decoded and syntax-checked.")
           print("Downloader source length:", len(decoded))
-          print(decoded)
           PY
+
+      - name: Exercise progressive stream against a slow local API
+        run: python tests/test_progressive_audio.py
 
       - name: Confirm isolated branch
         run: |
